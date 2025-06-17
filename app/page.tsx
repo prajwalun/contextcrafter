@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +29,8 @@ import {
   Sparkles,
   Zap,
   Shield,
+  Upload,
+  X,
 } from "lucide-react"
 
 interface ProcessedItem {
@@ -53,8 +55,8 @@ interface ProcessingResult {
 export default function ContentIngestionPipeline() {
   const [activeTab, setActiveTab] = useState("url")
   const [url, setUrl] = useState("")
-  const [teamId, setTeamId] = useState("aline123")
-  const [userId, setUserId] = useState("user_001")
+  const [teamId, setTeamId] = useState("") // Always start empty
+  const [userId, setUserId] = useState("") // Always start empty
   const [file, setFile] = useState<File | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -63,9 +65,32 @@ export default function ContentIngestionPipeline() {
   const [processingStatus, setProcessingStatus] = useState("")
   const [copied, setCopied] = useState(false)
 
+  // Only get from URL params if explicitly provided, don't use localStorage
+  useEffect(() => {
+    // Always start with clean state - no URL parameter reading
+  }, [])
+
+  // Simple handlers - no localStorage
+  const handleTeamIdChange = (value: string) => {
+    setTeamId(value)
+    // Don't update URL or localStorage
+  }
+
+  const handleUserIdChange = (value: string) => {
+    setUserId(value)
+    // Don't update URL or localStorage
+  }
+
   const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!url.trim()) return
+    if (!url.trim() || !teamId.trim() || !userId.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in Team ID, User ID, and URL",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsProcessing(true)
     setProgress(0)
@@ -81,8 +106,8 @@ export default function ContentIngestionPipeline() {
         },
         body: JSON.stringify({
           url: url.trim(),
-          team_id: teamId,
-          user_id: userId,
+          team_id: teamId.trim(),
+          user_id: userId.trim(),
         }),
       })
 
@@ -141,7 +166,14 @@ export default function ContentIngestionPipeline() {
 
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!file) return
+    if (!file || !teamId.trim() || !userId.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in Team ID, User ID, and select a file",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsProcessing(true)
     setProgress(0)
@@ -152,56 +184,114 @@ export default function ContentIngestionPipeline() {
     try {
       const formData = new FormData()
       formData.append("file", file)
-      formData.append("team_id", teamId)
-      formData.append("user_id", userId)
+      formData.append("team_id", teamId.trim())
+      formData.append("user_id", userId.trim())
+
+      console.log("📤 Sending PDF processing request...")
+      console.log("File:", file.name, file.size, "bytes")
+      console.log("Team ID:", teamId)
+      console.log("User ID:", userId)
 
       const response = await fetch("/api/extract-pdf", {
         method: "POST",
         body: formData,
       })
 
+      console.log("📥 Response status:", response.status)
+      console.log("📥 Response headers:", response.headers.get("content-type"))
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        const errorText = await response.text()
+        console.error("❌ Response error:", errorText)
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
       }
 
-      const reader = response.body?.getReader()
+      // Check if response is actually a stream
+      if (!response.body) {
+        throw new Error("No response body received")
+      }
+
+      const reader = response.body.getReader()
       const decoder = new TextDecoder()
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+      console.log("📖 Reading response stream...")
+      let buffer = ""
+      let hasReceivedData = false
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split("\n")
+      while (true) {
+        const { done, value } = await reader.read()
 
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6))
+        if (done) {
+          console.log("📖 Stream ended")
+          break
+        }
+
+        hasReceivedData = true
+        const chunk = decoder.decode(value, { stream: true })
+        buffer += chunk
+        console.log("📦 Received chunk:", chunk.substring(0, 100) + "...")
+
+        // Process complete lines
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || "" // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const jsonStr = line.slice(6).trim()
+              if (jsonStr) {
+                const data = JSON.parse(jsonStr)
+                console.log("📊 Parsed data:", data.type, data)
 
                 if (data.type === "progress") {
                   setProgress(data.progress)
                   setProcessingStatus(data.status)
+                  console.log(`📊 Progress: ${data.progress}% - ${data.status}`)
                 } else if (data.type === "result") {
+                  console.log("✅ Processing complete! Result:", data.result)
+                  console.log("📋 Result details:", {
+                    totalItems: data.result.total_items,
+                    items: data.result.items?.length,
+                    processingTime: data.result.processing_time,
+                  })
+
                   setResult(data.result)
                   setProgress(100)
                   setProcessingStatus("PDF processing completed!")
+
                   toast({
                     title: "PDF Processing Complete!",
                     description: `Successfully extracted ${data.result.total_items} chapters`,
                   })
                 } else if (data.type === "error") {
+                  console.error("❌ Processing error:", data.error)
                   throw new Error(data.error)
                 }
-              } catch (e) {
-                // Skip invalid JSON lines
               }
+            } catch (parseError) {
+              console.warn("⚠️ Failed to parse line:", line, parseError)
             }
           }
         }
       }
+
+      // Process any remaining buffer
+      if (buffer.trim()) {
+        console.log("📦 Final buffer:", buffer)
+      }
+
+      // Check if we received any data at all
+      if (!hasReceivedData) {
+        throw new Error("No data received from server")
+      }
+
+      // If we got here but no result was set, something went wrong
+      if (!result) {
+        console.error("❌ Stream completed but no result received")
+        throw new Error("Processing completed but no result was returned")
+      }
     } catch (err) {
+      console.error("❌ PDF processing failed:", err)
       setError(err instanceof Error ? err.message : "An error occurred")
       toast({
         title: "PDF Processing Failed",
@@ -253,6 +343,18 @@ export default function ContentIngestionPipeline() {
         variant: "destructive",
       })
     }
+  }
+
+  const removeFile = () => {
+    setFile(null)
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes"
+    const k = 1024
+    const sizes = ["Bytes", "KB", "MB", "GB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
   }
 
   return (
@@ -317,8 +419,8 @@ export default function ContentIngestionPipeline() {
                 <Input
                   id="team-id"
                   value={teamId}
-                  onChange={(e) => setTeamId(e.target.value)}
-                  placeholder="Enter team ID"
+                  onChange={(e) => handleTeamIdChange(e.target.value)}
+                  placeholder="Enter your team ID"
                   className="h-11"
                 />
               </div>
@@ -329,8 +431,8 @@ export default function ContentIngestionPipeline() {
                 <Input
                   id="user-id"
                   value={userId}
-                  onChange={(e) => setUserId(e.target.value)}
-                  placeholder="Enter user ID"
+                  onChange={(e) => handleUserIdChange(e.target.value)}
+                  placeholder="Enter your user ID"
                   className="h-11"
                 />
               </div>
@@ -367,7 +469,7 @@ export default function ContentIngestionPipeline() {
                       />
                       <Button
                         type="submit"
-                        disabled={isProcessing || !url.trim()}
+                        disabled={isProcessing || !url.trim() || !teamId.trim() || !userId.trim()}
                         className="px-8 h-12 font-medium"
                         size="lg"
                       >
@@ -390,52 +492,99 @@ export default function ContentIngestionPipeline() {
               </TabsContent>
 
               <TabsContent value="pdf" className="space-y-6 mt-8">
-                <form onSubmit={handleFileUpload} className="space-y-6">
-                  <div className="space-y-3">
-                    <Label htmlFor="file" className="text-base font-medium">
-                      PDF Document
-                    </Label>
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-1">
-                        <div className="relative">
-                          <Input
-                            id="file"
-                            type="file"
-                            accept=".pdf"
-                            onChange={(e) => setFile(e.target.files?.[0] || null)}
-                            disabled={isProcessing}
-                            className="h-12 file:mr-4 file:py-2 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 file:cursor-pointer"
-                          />
-                          {file && (
-                            <div className="mt-2 text-sm text-muted-foreground flex items-center">
-                              <FileText className="h-4 w-4 mr-2" />
-                              {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <Label className="text-base font-medium">PDF Document</Label>
+
+                    {/* File Upload Area - Apple/Google Style */}
+                    <div className="relative">
+                      {!file ? (
+                        <div className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-8 text-center hover:border-muted-foreground/50 transition-colors">
+                          <div className="flex flex-col items-center space-y-4">
+                            <div className="p-4 bg-muted/30 rounded-full">
+                              <Upload className="h-8 w-8 text-muted-foreground" />
                             </div>
-                          )}
+                            <div className="space-y-2">
+                              <p className="text-lg font-medium">Choose a PDF file</p>
+                              <p className="text-sm text-muted-foreground">
+                                Drag and drop your file here, or click to browse
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="relative overflow-hidden"
+                              disabled={isProcessing}
+                            >
+                              <FileUp className="h-4 w-4 mr-2" />
+                              Browse Files
+                              <input
+                                type="file"
+                                accept=".pdf"
+                                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                disabled={isProcessing}
+                              />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                      <Button
-                        type="submit"
-                        disabled={isProcessing || !file}
-                        className="px-8 h-12 font-medium"
-                        size="lg"
-                      >
-                        {isProcessing ? (
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                        ) : (
-                          <>
-                            <FileUp className="h-5 w-5 mr-2" />
-                            Process
-                          </>
-                        )}
-                      </Button>
+                      ) : (
+                        <div className="border border-border rounded-xl p-6 bg-muted/20">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-4">
+                              <div className="p-3 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
+                                <FileText className="h-6 w-6 text-blue-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-foreground truncate">{file.name}</p>
+                                <p className="text-sm text-muted-foreground">{formatFileSize(file.size)}</p>
+                              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={removeFile}
+                              disabled={isProcessing}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Process Button - Clean and Professional */}
+                    {file && (
+                      <div className="flex justify-center pt-4">
+                        <Button
+                          onClick={handleFileUpload}
+                          disabled={isProcessing || !teamId.trim() || !userId.trim()}
+                          size="lg"
+                          className="px-12 h-12 font-medium bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg"
+                        >
+                          {isProcessing ? (
+                            <>
+                              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-5 w-5 mr-2" />
+                              Process PDF
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
+
                   <div className="text-sm text-muted-foreground bg-muted/30 p-4 rounded-lg">
                     <strong>Supported formats:</strong> Technical books, guides, documentation with automatic chapter
                     detection and intelligent content splitting.
                   </div>
-                </form>
+                </div>
               </TabsContent>
             </Tabs>
 
@@ -475,7 +624,7 @@ export default function ContentIngestionPipeline() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <CheckCircle className="h-6 w-6 text-green-600" />
-                      <CardTitle className="text-green-800 dark:text-green-400 text-xl">Extraction Complete</CardTitle>
+                      <CardTitle className="text-green-800 dark:text-green-400 text-xl">Processing Complete</CardTitle>
                     </div>
                     <div className="flex space-x-3">
                       <Button

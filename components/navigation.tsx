@@ -12,6 +12,7 @@ export function Navigation() {
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
+  // Simple navigation without team_id parameters
   const navigation = [
     { name: "Home", href: "/", icon: Home },
     { name: "Dashboard", href: "/dashboard", icon: BarChart3 },
@@ -79,7 +80,7 @@ export function Navigation() {
               {navigation.map((item) => (
                 <Link
                   key={item.name}
-                  href={item.href}
+                  href={item.href} // This should always be clean
                   className={cn(
                     "flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 hover:bg-accent hover:text-accent-foreground",
                     pathname === item.href
@@ -138,7 +139,7 @@ export function Navigation() {
               {navigation.map((item) => (
                 <Link
                   key={item.name}
-                  href={item.href}
+                  href={item.href} // Clean href only
                   className={cn(
                     "flex items-center px-3 py-2 rounded-md text-base font-medium transition-colors",
                     pathname === item.href

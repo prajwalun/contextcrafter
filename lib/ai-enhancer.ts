@@ -16,7 +16,15 @@ export class AIContentEnhancer {
   private isEnabled: boolean
 
   constructor() {
-    this.isEnabled = !!process.env.OPENAI_API_KEY
+    // In Next.js, process.env is available on the server side
+    // Check if we're running on the server and if the API key exists
+    this.isEnabled = typeof process !== "undefined" && !!process.env.OPENAI_API_KEY
+
+    if (this.isEnabled) {
+      console.log("✅ AI Enhancement enabled with OpenAI")
+    } else {
+      console.log("⚠️ AI Enhancement disabled - no OpenAI API key found")
+    }
   }
 
   async enhanceContent(title: string, content: string, contentType: string): Promise<ContentEnhancement> {

@@ -30,514 +30,153 @@ interface ProcessingResult {
 }
 
 // Database client setup
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const supabase = createClient(supabaseUrl, supabaseKey)
+function createSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// Real content extraction service with database integration
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("❌ Supabase environment variables not configured")
+    throw new Error("Database not configured - missing Supabase environment variables")
+  }
+
+  try {
+    return createClient(supabaseUrl, supabaseKey)
+  } catch (error) {
+    console.error("❌ Failed to create Supabase client:", error)
+    throw new Error("Failed to connect to database")
+  }
+}
+
+// Real content extraction service
 class ContentExtractor {
   private async delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   private async saveExtractionJob(teamId: string, userId: string, url: string, status: string, progress = 0) {
-    const { data, error } = await supabase
-      .from("extraction_jobs")
-      .insert({
-        team_id: teamId,
-        user_id: userId,
-        job_type: "url",
-        source_identifier: url,
-        status,
-        progress,
-      })
-      .select()
-      .single()
+    const supabase = createSupabaseClient()
 
-    if (error) throw error
-    return data
-  }
-
-  private async updateExtractionJob(jobId: number, updates: any) {
-    const { error } = await supabase.from("extraction_jobs").update(updates).eq("id", jobId)
-
-    if (error) throw error
-  }
-
-  private async saveKnowledgeBaseItems(items: ProcessedItem[]) {
-    const { data, error } = await supabase.from("knowledge_base_items").insert(items).select()
-
-    if (error) throw error
-    return data
-  }
-
-  private async checkProcessedSource(teamId: string, url: string) {
-    const { data } = await supabase
-      .from("processed_sources")
-      .select("*")
-      .eq("team_id", teamId)
-      .eq("source_url", url)
-      .single()
-
-    return data
-  }
-
-  private async saveProcessedSource(teamId: string, url: string, itemsCount: number) {
-    const { error } = await supabase.from("processed_sources").upsert({
-      team_id: teamId,
-      source_url: url,
-      source_type: this.detectSourceType(url),
-      items_count: itemsCount,
-      last_processed: new Date().toISOString(),
-    })
-
-    if (error) throw error
-  }
-
-  private detectSourceType(url: string): string {
-    if (url.includes("substack")) return "substack"
-    if (url.includes("interviewing.io")) return "interviewing_io"
-    if (url.includes("blog")) return "blog"
-    return "website"
-  }
-
-  // Rest of the extraction methods remain the same...
-  private async extractFromUrl(url: string): Promise<Partial<ProcessedItem>[]> {
-    // Same implementation as before
-    if (url.includes("blog") || url.includes("substack")) {
-      return this.extractBlogContent(url)
-    } else if (url.includes("interviewing.io")) {
-      return this.extractInterviewingIOContent(url)
-    } else if (url.includes("quill.co")) {
-      return this.extractQuillContent(url)
-    } else {
-      return this.extractGenericContent(url)
-    }
-  }
-
-  // Keep all the existing extraction methods (extractBlogContent, etc.)
-  private async extractBlogContent(url: string): Promise<Partial<ProcessedItem>[]> {
-    // Simulate blog extraction
-    await this.delay(1000)
-
-    const mockPosts = [
-      {
-        title: "Advanced System Design Patterns",
-        content: `# Advanced System Design Patterns
-
-System design is a critical skill for senior engineers. In this comprehensive guide, we'll explore advanced patterns that can help you build scalable, maintainable systems.
-
-## Load Balancing Strategies
-
-Load balancing is essential for distributing traffic across multiple servers. Here are the key strategies:
-
-### Round Robin
-The simplest approach - requests are distributed sequentially across servers.
-
-### Weighted Round Robin
-Similar to round robin, but servers can be assigned different weights based on their capacity.
-
-### Least Connections
-Routes requests to the server with the fewest active connections.
-
-## Caching Patterns
-
-Effective caching can dramatically improve system performance:
-
-### Cache-Aside Pattern
-The application manages the cache directly, loading data on cache misses.
-
-### Write-Through Cache
-Data is written to both the cache and the database simultaneously.
-
-### Write-Behind Cache
-Data is written to the cache immediately and to the database asynchronously.
-
-## Database Scaling
-
-As your application grows, database scaling becomes crucial:
-
-### Read Replicas
-Create read-only copies of your database to handle read traffic.
-
-### Sharding
-Partition your data across multiple databases based on a shard key.
-
-### Federation
-Split databases by function (e.g., users, products, orders).
-
-This guide provides a foundation for building systems that can handle millions of users while maintaining performance and reliability.`,
-        content_type: "blog",
-        author: "Sarah Chen",
-        word_count: 245,
-      },
-      {
-        title: "Microservices Communication Patterns",
-        content: `# Microservices Communication Patterns
-
-When building microservices architectures, choosing the right communication patterns is crucial for system reliability and performance.
-
-## Synchronous Communication
-
-### HTTP/REST
-The most common pattern for service-to-service communication.
-
-**Pros:**
-- Simple and well-understood
-- Great tooling support
-- Easy to debug
-
-**Cons:**
-- Tight coupling
-- Cascading failures
-- Higher latency
-
-### GraphQL
-A query language that allows clients to request exactly the data they need.
-
-## Asynchronous Communication
-
-### Message Queues
-Decouple services using message brokers like RabbitMQ or Apache Kafka.
-
-**Benefits:**
-- Loose coupling
-- Better fault tolerance
-- Improved scalability
-
-### Event Sourcing
-Store all changes as a sequence of events rather than just the current state.
-
-## Service Discovery
-
-In a microservices environment, services need to find and communicate with each other:
-
-### Client-Side Discovery
-Services register themselves with a service registry, and clients query the registry to find service instances.
-
-### Server-Side Discovery
-A load balancer queries the service registry and forwards requests to available instances.
-
-## Circuit Breaker Pattern
-
-Prevent cascading failures by monitoring service calls and "opening the circuit" when failures exceed a threshold.
-
-The key to successful microservices is choosing the right communication pattern for each use case.`,
-        content_type: "blog",
-        author: "Mike Rodriguez",
-        word_count: 198,
-      },
-    ]
-
-    return mockPosts.map((post) => ({
-      ...post,
-      source_url: url,
-      extracted_at: new Date().toISOString(),
-    }))
-  }
-
-  private async extractInterviewingIOContent(url: string): Promise<Partial<ProcessedItem>[]> {
-    await this.delay(1500)
-
-    return [
-      {
-        title: "Google Interview Guide - Technical Preparation",
-        content: `# Google Interview Guide - Technical Preparation
-
-Preparing for a Google technical interview requires a systematic approach. This guide covers everything you need to know.
-
-## Interview Process Overview
-
-Google's technical interview process typically consists of:
-
-1. **Phone/Video Screen** (45-60 minutes)
-2. **Onsite Interviews** (4-5 rounds, 45 minutes each)
-3. **Hiring Committee Review**
-4. **Team Matching**
-
-## Technical Topics to Master
-
-### Data Structures
-- Arrays and Strings
-- Linked Lists
-- Stacks and Queues
-- Trees and Graphs
-- Hash Tables
-- Heaps
-
-### Algorithms
-- Sorting and Searching
-- Dynamic Programming
-- Recursion and Backtracking
-- Graph Algorithms (BFS, DFS)
-- Greedy Algorithms
-
-### System Design (Senior Roles)
-- Scalability principles
-- Database design
-- Caching strategies
-- Load balancing
-- Microservices architecture
-
-## Coding Interview Tips
-
-### Before the Interview
-1. Practice on a whiteboard or Google Doc
-2. Review your resume thoroughly
-3. Prepare questions about the role and team
-
-### During the Interview
-1. **Clarify the problem** - Ask questions to understand requirements
-2. **Think out loud** - Explain your thought process
-3. **Start with a brute force solution** - Then optimize
-4. **Test your code** - Walk through examples
-5. **Discuss trade-offs** - Time/space complexity
-
-### Common Mistakes to Avoid
-- Jumping into coding without understanding the problem
-- Not considering edge cases
-- Writing code without explaining the approach
-- Getting stuck on optimization too early
-
-## Sample Problems
-
-### Easy: Two Sum
-Given an array of integers and a target sum, return indices of two numbers that add up to the target.
-
-### Medium: Longest Substring Without Repeating Characters
-Find the length of the longest substring without repeating characters.
-
-### Hard: Merge k Sorted Lists
-Merge k sorted linked lists and return it as one sorted list.
-
-## Behavioral Interview Preparation
-
-Google also evaluates cultural fit through behavioral questions:
-
-- Tell me about a time you faced a technical challenge
-- Describe a project you're proud of
-- How do you handle disagreements with teammates?
-- Why do you want to work at Google?
-
-Use the STAR method (Situation, Task, Action, Result) to structure your responses.
-
-## Final Tips
-
-1. **Practice consistently** - Solve 2-3 problems daily
-2. **Mock interviews** - Practice with peers or use platforms like Pramp
-3. **Study Google's culture** - Understand their values and mission
-4. **Stay calm** - Take deep breaths and think clearly
-
-Remember, the interview is not just about getting the right answer, but demonstrating your problem-solving approach and communication skills.
-
-Good luck with your Google interview preparation!`,
-        content_type: "interview_guide",
-        author: "Interviewing.io Team",
-        source_url: url,
-        word_count: 456,
-        extracted_at: new Date().toISOString(),
-      },
-    ]
-  }
-
-  private async extractQuillContent(url: string): Promise<Partial<ProcessedItem>[]> {
-    await this.delay(800)
-
-    return [
-      {
-        title: "Building Resilient APIs with Node.js",
-        content: `# Building Resilient APIs with Node.js
-
-Creating robust APIs that can handle failures gracefully is essential for production applications. This guide covers key patterns and practices.
-
-## Error Handling Strategies
-
-### Global Error Handler
-Implement a centralized error handling middleware:
-
-\`\`\`javascript
-app.use((err, req, res, next) => {
-  console.error(err.stack)
-  
-  if (err.type === 'validation') {
-    return res.status(400).json({
-      error: 'Validation failed',
-      details: err.details
-    })
-  }
-  
-  res.status(500).json({
-    error: 'Internal server error'
-  })
-})
-\`\`\`
-
-### Async Error Handling
-Use try-catch blocks or error-first callbacks consistently:
-
-\`\`\`javascript
-app.get('/users/:id', async (req, res, next) => {
-  try {
-    const user = await User.findById(req.params.id)
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
-    }
-    res.json(user)
-  } catch (error) {
-    next(error)
-  }
-})
-\`\`\`
-
-## Rate Limiting
-
-Protect your API from abuse with rate limiting:
-
-\`\`\`javascript
-const rateLimit = require('express-rate-limit')
-
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP'
-})
-
-app.use('/api/', limiter)
-\`\`\`
-
-## Health Checks
-
-Implement health check endpoints for monitoring:
-
-\`\`\`javascript
-app.get('/health', async (req, res) => {
-  const health = {
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    checks: {
-      database: await checkDatabase(),
-      redis: await checkRedis(),
-      external_api: await checkExternalAPI()
-    }
-  }
-  
-  const isHealthy = Object.values(health.checks).every(check => check.status === 'OK')
-  
-  res.status(isHealthy ? 200 : 503).json(health)
-})
-\`\`\`
-
-## Circuit Breaker Pattern
-
-Prevent cascading failures when calling external services:
-
-\`\`\`javascript
-class CircuitBreaker {
-  constructor(threshold = 5, timeout = 60000) {
-    this.threshold = threshold
-    this.timeout = timeout
-    this.failureCount = 0
-    this.state = 'CLOSED'
-    this.nextAttempt = Date.now()
-  }
-  
-  async call(fn) {
-    if (this.state === 'OPEN') {
-      if (Date.now() < this.nextAttempt) {
-        throw new Error('Circuit breaker is OPEN')
-      }
-      this.state = 'HALF_OPEN'
-    }
-    
     try {
-      const result = await fn()
-      this.onSuccess()
-      return result
+      const { data, error } = await supabase
+        .from("extraction_jobs")
+        .insert({
+          team_id: teamId,
+          user_id: userId,
+          job_type: "url",
+          source_identifier: url,
+          status,
+          progress,
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+      return data
     } catch (error) {
-      this.onFailure()
+      console.error("❌ Failed to save extraction job:", error)
       throw error
     }
   }
-  
-  onSuccess() {
-    this.failureCount = 0
-    this.state = 'CLOSED'
-  }
-  
-  onFailure() {
-    this.failureCount++
-    if (this.failureCount >= this.threshold) {
-      this.state = 'OPEN'
-      this.nextAttempt = Date.now() + this.timeout
+
+  private async updateExtractionJob(jobId: number, updates: any) {
+    const supabase = createSupabaseClient()
+
+    try {
+      const { error } = await supabase.from("extraction_jobs").update(updates).eq("id", jobId)
+      if (error) throw error
+    } catch (error) {
+      console.error("❌ Failed to update extraction job:", error)
+      throw error
     }
   }
-}
-\`\`\`
 
-## Graceful Shutdown
+  private async saveKnowledgeBaseItems(items: ProcessedItem[]) {
+    const supabase = createSupabaseClient()
 
-Handle shutdown signals properly:
+    try {
+      console.log("💾 Saving", items.length, "items to knowledge base...")
 
-\`\`\`javascript
-process.on('SIGTERM', gracefulShutdown)
-process.on('SIGINT', gracefulShutdown)
+      // Remove metadata field if it doesn't exist in the database
+      const itemsToSave = items.map((item) => {
+        const { metadata, ...itemWithoutMetadata } = item
+        return itemWithoutMetadata
+      })
 
-function gracefulShutdown(signal) {
-  console.log(\`Received \${signal}. Starting graceful shutdown...\`)
-  
-  server.close(() => {
-    console.log('HTTP server closed')
-    
-    // Close database connections
-    mongoose.connection.close(() => {
-      console.log('Database connection closed')
-      process.exit(0)
-    })
-  })
-}
-\`\`\`
+      const { data, error } = await supabase.from("knowledge_base_items").insert(itemsToSave).select()
 
-Building resilient APIs requires thinking about failure scenarios from the start. These patterns will help you create APIs that can handle the unexpected gracefully.`,
-        content_type: "blog",
-        author: "Alex Thompson",
-        source_url: url,
-        word_count: 387,
-        extracted_at: new Date().toISOString(),
-      },
-    ]
+      if (error) {
+        console.error("❌ Database insert error:", error)
+        throw error
+      }
+      console.log("✅ Knowledge base items saved:", data?.length)
+      return data
+    } catch (error) {
+      console.error("❌ Failed to save knowledge base items:", error)
+      throw error
+    }
   }
 
-  private async extractGenericContent(url: string): Promise<Partial<ProcessedItem>[]> {
-    await this.delay(1200)
+  private async realWebScraping(url: string): Promise<Partial<ProcessedItem>[]> {
+    console.log("🌐 Starting real web scraping for:", url)
 
-    return [
-      {
-        title: "Generic Web Content",
-        content: `# Web Content Analysis
+    try {
+      // Use a real web scraping service or library
+      // For now, I'll simulate a real extraction that can fail
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; ContextCrafter/1.0; +https://contextcrafter.com/bot)",
+        },
+      })
 
-This content was extracted from a generic website using our universal extraction engine.
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`)
+      }
 
-## Content Overview
+      const html = await response.text()
 
-The extraction process identified this as general web content that doesn't fit into specific categories like blogs or technical guides.
+      if (!html || html.length < 100) {
+        throw new Error("URL returned empty or insufficient content")
+      }
 
-## Extraction Method
+      // Basic HTML parsing (in production, use a proper library like Cheerio)
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
+      const title = titleMatch ? titleMatch[1].trim() : "Extracted Content"
 
-Our system used multiple fallback strategies:
-1. HTML parsing with readability algorithms
-2. Content structure analysis
-3. Metadata extraction
-4. Text normalization
+      // Extract text content (basic implementation)
+      const textContent = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
 
-The content has been cleaned and formatted for optimal knowledge base integration.`,
-        content_type: "other",
-        author: "Unknown",
-        source_url: url,
-        word_count: 89,
-        extracted_at: new Date().toISOString(),
-      },
-    ]
+      if (textContent.length < 200) {
+        throw new Error("Extracted content is too short - may not be a valid article")
+      }
+
+      // Determine content type based on URL
+      let contentType = "article"
+      if (url.includes("blog")) contentType = "blog"
+      if (url.includes("substack")) contentType = "newsletter"
+      if (url.includes("docs")) contentType = "documentation"
+
+      const wordCount = textContent.split(/\s+/).length
+
+      return [
+        {
+          title: title,
+          content: textContent.substring(0, 5000), // Limit content length
+          content_type: contentType,
+          source_url: url,
+          author: "Web Author", // In production, extract from meta tags
+          word_count: wordCount,
+          extracted_at: new Date().toISOString(),
+        },
+      ]
+    } catch (error) {
+      console.error("❌ Real web scraping failed:", error)
+      throw new Error(`Web scraping failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
   }
 
   async extract(
@@ -550,50 +189,33 @@ The content has been cleaned and formatted for optimal knowledge base integratio
     let job: any
 
     try {
-      // Create extraction job
-      job = await this.saveExtractionJob(teamId, userId, url, "processing", 0)
+      console.log("🚀 Starting REAL URL extraction for:", url)
+      console.log("📋 Parameters:", { teamId, userId })
 
-      onProgress(10, "Checking if source was already processed...")
-      const existingSource = await this.checkProcessedSource(teamId, url)
-
-      if (existingSource && existingSource.last_processed) {
-        const lastProcessed = new Date(existingSource.last_processed)
-        const daysSinceProcessed = (Date.now() - lastProcessed.getTime()) / (1000 * 60 * 60 * 24)
-
-        if (daysSinceProcessed < 7) {
-          onProgress(100, "Source recently processed, skipping...")
-          await this.updateExtractionJob(job.id, {
-            status: "completed",
-            progress: 100,
-            items_extracted: existingSource.items_count,
-          })
-
-          // Return existing items from database
-          const { data: existingItems } = await supabase
-            .from("knowledge_base_items")
-            .select("*")
-            .eq("team_id", teamId)
-            .eq("source_url", url)
-
-          return {
-            team_id: teamId,
-            items: existingItems || [],
-            total_items: existingItems?.length || 0,
-            processing_time: 0,
-            sources_processed: [url],
-          }
-        }
+      // Validate URL
+      try {
+        new URL(url)
+      } catch {
+        throw new Error("Invalid URL format")
       }
 
-      onProgress(25, "Analyzing URL structure...")
-      await this.delay(300)
-      await this.updateExtractionJob(job.id, { progress: 25 })
+      // Create extraction job
+      onProgress(5, "Creating extraction job...")
+      job = await this.saveExtractionJob(teamId, userId, url, "processing", 5)
 
-      onProgress(40, "Extracting content...")
-      const extractedItems = await this.extractFromUrl(url)
-      await this.updateExtractionJob(job.id, { progress: 40 })
+      onProgress(15, "Fetching content from URL...")
+      await this.delay(500)
+      await this.updateExtractionJob(job.id, { progress: 15 })
 
-      onProgress(60, "Processing and cleaning content...")
+      onProgress(30, "Extracting and parsing content...")
+      const extractedItems = await this.realWebScraping(url)
+      await this.updateExtractionJob(job.id, { progress: 30 })
+
+      if (!extractedItems || extractedItems.length === 0) {
+        throw new Error("No content could be extracted from the URL")
+      }
+
+      onProgress(50, "Processing content with AI...")
       const aiEnhancer = new AIContentEnhancer()
 
       // Process each item with AI enhancement
@@ -603,20 +225,19 @@ The content has been cleaned and formatted for optimal knowledge base integratio
           const enhancement = await aiEnhancer.enhanceContent(
             item.title || "Untitled",
             item.content || "",
-            item.content_type || "other",
+            item.content_type || "article",
           )
 
           enhancedItems.push({
             team_id: teamId,
             title: item.title || "Untitled",
             content: enhancement.cleanedContent,
-            content_type: item.content_type || "other",
+            content_type: item.content_type || "article",
             source_url: item.source_url || url,
             author: item.author || "Unknown",
             user_id: userId,
             word_count: enhancement.cleanedContent.split(/\s+/).length,
             extracted_at: item.extracted_at || new Date().toISOString(),
-            // Store AI metadata as JSON in a metadata field (you'd need to add this column)
             metadata: JSON.stringify({
               summary: enhancement.extractedMetadata.summary,
               keyTopics: enhancement.extractedMetadata.keyTopics,
@@ -627,12 +248,13 @@ The content has been cleaned and formatted for optimal knowledge base integratio
             }),
           })
         } catch (error) {
+          console.warn("⚠️ AI enhancement failed, using basic processing:", error)
           // Fallback to basic processing if AI fails
           enhancedItems.push({
             team_id: teamId,
             title: item.title || "Untitled",
             content: item.content || "",
-            content_type: item.content_type || "other",
+            content_type: item.content_type || "article",
             source_url: item.source_url || url,
             author: item.author || "Unknown",
             user_id: userId,
@@ -642,27 +264,11 @@ The content has been cleaned and formatted for optimal knowledge base integratio
         }
       }
 
-      const items = enhancedItems
-      await this.updateExtractionJob(job.id, { progress: 60 })
+      await this.updateExtractionJob(job.id, { progress: 70 })
 
-      onProgress(80, "Saving to knowledge base...")
-      const itemsToSave: ProcessedItem[] = items.map((item) => ({
-        team_id: teamId,
-        title: item.title || "Untitled",
-        content: item.content || "",
-        content_type: item.content_type || "other",
-        source_url: item.source_url || url,
-        author: item.author || "Unknown",
-        user_id: userId,
-        word_count: item.word_count || 0,
-        extracted_at: item.extracted_at || new Date().toISOString(),
-        metadata: item.metadata,
-      }))
-
-      // Save to database
-      await this.saveKnowledgeBaseItems(itemsToSave)
-      await this.saveProcessedSource(teamId, url, items.length)
-      await this.updateExtractionJob(job.id, { progress: 80 })
+      onProgress(85, "Saving to knowledge base...")
+      await this.saveKnowledgeBaseItems(enhancedItems)
+      await this.updateExtractionJob(job.id, { progress: 85 })
 
       onProgress(95, "Finalizing extraction...")
       await this.delay(200)
@@ -672,22 +278,39 @@ The content has been cleaned and formatted for optimal knowledge base integratio
       await this.updateExtractionJob(job.id, {
         status: "completed",
         progress: 100,
-        items_extracted: items.length,
+        items_extracted: enhancedItems.length,
         processing_time: processingTime,
       })
 
-      return {
+      const result = {
         team_id: teamId,
-        items,
-        total_items: items.length,
+        items: enhancedItems,
+        total_items: enhancedItems.length,
         processing_time: processingTime,
         sources_processed: [url],
       }
+
+      console.log("🎉 URL extraction completed successfully!")
+      console.log("📊 Final result:", {
+        items: result.total_items,
+        processingTime: result.processing_time + "s",
+        totalWords: result.items.reduce((sum, item) => sum + item.word_count, 0),
+      })
+
+      // Trigger dashboard update
+      console.log("🔔 Triggering dashboard update...")
+      // This will be picked up by the dashboard's real-time updates
+
+      return result
     } catch (error) {
+      console.error("❌ URL extraction failed:", error)
+
       if (job) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error"
+        console.log("📝 Marking job as failed:", job.id, errorMessage)
         await this.updateExtractionJob(job.id, {
           status: "failed",
-          error_message: error instanceof Error ? error.message : "Unknown error",
+          error_message: errorMessage,
         })
       }
       throw error
@@ -696,6 +319,11 @@ The content has been cleaned and formatted for optimal knowledge base integratio
 }
 
 export async function POST(request: NextRequest) {
+  console.log("🔍 Environment check:")
+  console.log("OPENAI_API_KEY:", !!process.env.OPENAI_API_KEY)
+  console.log("SUPABASE_URL:", !!process.env.NEXT_PUBLIC_SUPABASE_URL)
+  console.log("SUPABASE_KEY:", !!process.env.SUPABASE_SERVICE_ROLE_KEY)
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -704,12 +332,16 @@ export async function POST(request: NextRequest) {
         const body: ExtractRequest = await request.json()
         const { url, team_id, user_id } = body
 
+        console.log("🌐 URL extraction request:", { url, team_id, user_id })
+
         if (!url || !team_id || !user_id) {
+          const errorMsg = "Missing required fields: url, team_id, user_id"
+          console.error("❌", errorMsg)
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
                 type: "error",
-                error: "Missing required fields: url, team_id, user_id",
+                error: errorMsg,
               })}\n\n`,
             ),
           )
@@ -720,6 +352,7 @@ export async function POST(request: NextRequest) {
         const extractor = new ContentExtractor()
 
         const result = await extractor.extract(url, team_id, user_id, (progress, status) => {
+          console.log(`📊 Progress: ${progress}% - ${status}`)
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -731,6 +364,11 @@ export async function POST(request: NextRequest) {
           )
         })
 
+        console.log("✅ URL extraction completed:", {
+          totalItems: result.total_items,
+          processingTime: result.processing_time,
+        })
+
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({
@@ -740,11 +378,12 @@ export async function POST(request: NextRequest) {
           ),
         )
       } catch (error) {
+        console.error("❌ URL extraction API error:", error)
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({
               type: "error",
-              error: error instanceof Error ? error.message : "Unknown error occurred",
+              error: error instanceof Error ? error.message : "URL extraction failed",
             })}\n\n`,
           ),
         )
